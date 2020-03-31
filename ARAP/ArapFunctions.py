@@ -5,6 +5,9 @@ import seaborn as sns
 import pandas_gbq
 import scipy.stats as stats 
 from scipy.stats import mannwhitneyu, wilcoxon, kruskal
+import re
+
+import fbprophet
 
 project_id = "cp-gaa-visualization-dev"
 
@@ -21,8 +24,6 @@ def query_table(sql_query):
     
     return pandas_gbq.read_gbq(sql_query, project_id=project_id)
     
-
-
 
 
 
@@ -249,7 +250,254 @@ def non_parametric_test(data1, data2, data3, alpha = 0.05,
         
             
         
+def flag_alt_products_2(data, prod_catalog, column='n1_purchased_product_title'):    
+    """ 
+    Parses through a product list.
+    Identifies if an alternate product is internal or not, and a substitute or not.
+    Returns a pandas dataframe.
+    
+    *************
+    Parameter(s):
+    *************
+    
+    1. data: str
+        pandas dataframe
+        
+    2. prod_catalog: str
+        A list of unique internal product
+       
+    3. column: str
+        Name of the relevant column.
+    """
+    soap_catalog = data['product_title'].unique().tolist()
+    asin_list = data['asin'].tolist()
+    prod_list = data['product_title'].tolist()
+    date_list = data['start_date'].tolist()
+    alt_purchase_list = data[column].tolist()
+    country_list = data['country'].tolist()
+    prefix = column.split('_')[0]
+    
+    internal_list = []
+    substitute_list = []
+    Yes = 'yes'
+    No = 'no'
+
+    for i in alt_purchase_list:
+        # Competitors:
+            # Case 1
+        if i in prod_catalog:
+            a1 = Yes
+            internal_list.append(a1)
+            # Case 2
+        else:
+            a2 = No
+            internal_list.append(a2)
+
+        # Substitutes:
+            # Case 1
+        if i in soap_catalog:
+            b1 = No
+            substitute_list.append(b1)
+            # Case 2    
+        elif ('Liquid Hand Soap' not in i) and ('Softsoap' in i):
+            b2 = No
+            substitute_list.append(b2)
+            # Case 3    
+        elif ('Liquid Hand Soap' in i) and ('Softsoap' not in i):
+            b3 = Yes
+            substitute_list.append(b3)
+            # Case 4    
+        else:
+            b4 = No
+            substitute_list.append(b4)
+
+    return pd.DataFrame({'start_date': date_list, 
+                  'asin': asin_list,
+                  'product_title': prod_list, 
+                  f'{column}': alt_purchase_list,
+                  f'{prefix}_internal': internal_list, 
+                  f'{prefix}_substitute': substitute_list,
+                        'country': country_list}) 
+
+
+## Use for Softsoap Analysis
+def process_data(data, column='n1_purchased_product_title'):
+    """
+    
+    """
+    
+    prod_catalog = data['product_title'].unique().tolist()
+    n1_prod_list = data[column].unique().tolist()
+    
+    ## Add to the prod_catalog list
+    for i in n1_prod_list:
+        if ('Softsoap' in i) and (i not in prod_catalog):
+            prod_catalog.append(i)
+    
+    processed_data = flag_alt_products_2(data, prod_catalog)
+    return processed_data
+
+
+
+def grab_product_size(data):
+    """
+    
+    """
+    data_title_1 = data.product_title.tolist()
+    final_sizes_1 = []
+    temp_1 = []
+    
+    data_title_2 = data.n1_purchased_product_title.tolist()
+    final_sizes_2 = []
+    temp_2 = []
+    
+    for i in data_title_1:
+        pattern = re.compile(r'(?:\d).*$')
+        size1 = re.findall(pattern, i)
+        temp_1.append(size1)
+
+    for j in temp_1:
+        if j == []:
+            j = 'NA'
+            final_sizes_1.append(j)
+
+        else:
+            size2 = ''.join(j)
+            final_sizes_1.append(size2)
+            
+   ## second column         
+    for i in data_title_2:
+        pattern = re.compile(r'(?:\d).*$')
+        size3 = re.findall(pattern, i)
+        temp_2.append(size3)
+
+    for j in temp_2:
+        if j == []:
+            j = 'NA'
+            final_sizes_2.append(j)
+
+        else:
+            size4 = ''.join(j)
+            final_sizes_2.append(size4)
+
+    df = pd.DataFrame({'viewed_size': final_sizes_1,
+                      'n1_purchased_size': final_sizes_2})
+    
+    return pd.merge(data, df, left_index=True, right_index=True)
+
+
+
+## displays viewed or purchased products
+def show_products(data, title='title', date='date'):
+    """
+    
+    """
+    counts = data.value_counts()[:11]
+
+    plt.figure(figsize=(28, 20))
+    plt.barh(y=counts.index, width=counts)
+    plt.xlabel('Number of Views', fontsize=16)
+    plt.ylabel('Products', fontsize=16)
+    plt.title(f'{title}: {date}', fontsize=24)
+    return plt.show()
 
 
 
 
+## displays subplots for viewed and purchased products
+def show_products_2(data, title1='title1', title2='title2', date='date'):
+    """
+    
+    """
+    
+    counts_1 = data.viewed_size.value_counts()[:11]
+    counts_2 = data.n1_purchased_size.value_counts()[:11]
+    fig = plt.figure(figsize=(28, 20))
+
+    plt.subplot(2, 2, 1)
+    plt.barh(y=counts_1.index, width=counts_1)
+    plt.ylabel('Products', fontsize=16)
+    plt.xlabel('Total Count', fontsize=16)
+    plt.title(f"{title1}: {date}", fontsize=20)
+
+    plt.subplot(2, 2, 3)
+    plt.barh(y=counts_2.index, width=counts_2)
+    plt.ylabel('Products', fontsize=16)
+    plt.xlabel('Total Count', fontsize=16)
+    plt.title(f"{title2}: {date}", fontsize=20)
+    
+    return plt.show()
+
+
+
+
+
+
+################################################ Times Series Forecasting #############################
+
+# Augmented Dickey-Fuller Test
+def interpret_dftest(dftest):
+    dfoutput = pd.Series(dftest[0:2], index=['Test Statistic','p-value'])
+    return dfoutput
+
+
+def find_optimal_diff(series):
+    """
+    finds and returns the lowest difference value d.
+    
+    Paramter(s):
+    1. series: Int
+        pandas series
+    """
+    
+    for d in range(1, len(series)):
+        print(f'Checking difference of {d}.')
+        print(f'p-value = {interpret_dftest(adfuller(series.diff(d).dropna()))["p-value"]}.')
+
+        # If our data, differenced by d time periods, are stationary, print that out!
+        if interpret_dftest(adfuller(series.diff(d).dropna()))['p-value'] < 0.05:
+            print(f'Differencing our time series by d={d} yields a stationary time series!')
+            break
+
+            print()
+
+            
+            
+            
+            
+def prep_data_for_tsmodel(data):
+    """
+    Groups data, sorts values, sets date as index,
+    filters by date and Yt, resamples at the daily level,
+    and returns a df with renamed columns.
+    """
+    
+    data = data.groupby(['product_title', 'start_date'], 
+                   as_index=False)[['shipped_units']].sum()
+    data.sort_values('start_date', ascending=True, inplace=True)
+    data.set_index('start_date', drop=False, inplace=True)
+    
+    data = data.loc[:, ['start_date', 'shipped_units']]
+    data = data.resample('D').sum()
+    data.reset_index(inplace=True)
+    
+    return data.rename(columns={'start_date': 'ds', 'shipped_units': 'y'})
+
+
+
+def view_predictions(y_preds, show_v_line=False, start=808):
+    """
+    Visualize predictions and forecast.
+    
+    """
+    
+    if show_v_line == False:
+        forecast_model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
+        plt.title('Shipped Units vs Predicted Units', fontsize=18)
+        return plt.show();
+    
+    else:
+        forecast_model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
+        plt.axvline(y_preds['ds'][start], color='r')
+        plt.title('Shipped Units vs Predicted Units', fontsize=18)
+        return plt.show();
