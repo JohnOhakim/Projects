@@ -8,6 +8,7 @@ from scipy.stats import mannwhitneyu, wilcoxon, kruskal
 import re
 
 import fbprophet
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 project_id = "cp-gaa-visualization-dev"
 
@@ -484,20 +485,299 @@ def prep_data_for_tsmodel(data):
     return data.rename(columns={'start_date': 'ds', 'shipped_units': 'y'})
 
 
+def forecast_data(data, holidays_df, dates, cap=50000, 
+                  cp_prior_scale=0.8, fourier_order=15, periods=180, 
+                  added_regressor = False, added_reg_name='added_reg'):
+    """
+    
+    """
+    
+    if added_regressor == False:
+        data['cap'] = cap
+        data['covid_period'] = np.where((data['ds'] > dates[0]) & (data['ds'] < dates[1]), True, False)
 
-def view_predictions(y_preds, show_v_line=False, start=808):
+        model = fbprophet.Prophet(changepoint_prior_scale=cp_prior_scale, yearly_seasonality=False, 
+                                       holidays=holidays_df, growth='logistic'
+                                      )
+
+        model.add_country_holidays(country_name='US')
+        model.add_seasonality(name='yearly', period=30, fourier_order=fourier_order, condition_name='covid_period')
+        model.fit(data)
+
+        preds_df = model.make_future_dataframe(periods=periods, freq='D')
+        preds_df['cap'] = cap
+        preds_df['covid_period'] = np.where((preds_df['ds'] > dates[0]) & (preds_df['ds'] < dates[1]), True, False)
+
+        return model.predict(preds_df), model
+    
+    else:
+        data['cap'] = cap
+        data['covid_period'] = np.where((data['ds'] > dates[0]) & (data['ds'] < dates[1]), True, False)
+
+        model = fbprophet.Prophet(changepoint_prior_scale=cp_prior_scale, yearly_seasonality=False, 
+                                       holidays=holidays_df, growth='logistic'
+                                      )
+
+        model.add_country_holidays(country_name='US')
+        model.add_regressor(added_reg_name)
+        model.add_seasonality(name='yearly', period=30, fourier_order=fourier_order, condition_name='covid_period')
+        model.fit(data)
+
+        preds_df = model.make_future_dataframe(periods=periods, freq='D')
+        preds_df['cap'] = cap
+        preds_df['covid_period'] = np.where((preds_df['ds'] > dates[0]) & (preds_df['ds'] < dates[1]), True, False)
+        preds_df[added_reg_name] = data[added_reg_name]
+        preds_df[added_reg_name].fillna(0, inplace=True)
+
+        return model.predict(preds_df), model
+
+def view_compoments(preds, model):
+    """
+    
+    """
+    
+    return model.plot_components(preds)
+
+    
+
+def view_predictions(y_preds, model, title='', show_v_line=False, start=808):
     """
     Visualize predictions and forecast.
     
     """
     
     if show_v_line == False:
-        forecast_model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
-        plt.title('Shipped Units vs Predicted Units', fontsize=18)
+        model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
+        plt.title(f'Shipped Units vs Predicted Units: {title}', fontsize=18)
         return plt.show();
     
     else:
-        forecast_model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
+        model.plot(y_preds, xlabel = 'Date', ylabel = 'Shipped Units', figsize=(15, 10))
         plt.axvline(y_preds['ds'][start], color='r')
-        plt.title('Shipped Units vs Predicted Units', fontsize=18)
+        plt.title(f"Shipped Units vs Predicted Units: {title}", fontsize=18)
         return plt.show();
+    
+    
+def check_model_accuracy(predictions_df, history_df, metric='rmse'):
+    """
+    Returns model accuracy using a specified metric
+    
+    Parameter(s):
+    1. predictions_df: pandas DataFrame
+        dataframe containing predictions from forecast
+        
+    2. history_df: pandas DataFrame
+        dataframe containing original data
+        
+    3. metric: str
+        takes a str with default as 'rmse'. Options include: 'r2', 'mse', 'mae'
+    
+    
+    """
+    
+    #metric_df = predictions_df.set_index('ds')[['yhat']].join(history_df.set_index('ds').y).reset_index()
+    
+    a = predictions_df.set_index('ds')[['yhat']]
+    b = history_df.set_index('ds').y
+    metric_df = a.join(b).reset_index()
+    metric_df = metric_df.dropna()
+    
+    if metric == 'r2':
+        return r2_score(metric_df.y, metric_df.yhat)
+    
+    if metric == 'mse':
+        return mean_squared_error(metric_df.y, metric_df.yhat)
+    
+    if metric == 'mae':
+        return mean_absolute_error(metric_df.y, metric_df.yhat)
+    
+    if metric == 'rmse':
+        return np.sqrt(mean_squared_error(metric_df.y, metric_df.yhat))
+    
+    
+    
+    
+def return_model_accuracy(predictions_df, history_df):
+    """
+    Returns a list containing model accuracy metrics
+    
+    Parameter(s):
+    1. predictions_df: pandas DataFrame
+        dataframe containing predictions from forecast
+        
+    2. history_df: pandas DataFrame
+        dataframe containing original data
+        
+    
+    
+    """
+    
+    #metric_df = predictions_df.set_index('ds')[['yhat']].join(history_df.set_index('ds').y).reset_index()
+    
+    a = predictions_df.set_index('ds')[['yhat']]
+    b = history_df.set_index('ds').y
+    metric_df = a.join(b).reset_index()
+    metric_df = metric_df.dropna()
+    
+    r2 = r2_score(metric_df.y, metric_df.yhat)
+    mse = mean_squared_error(metric_df.y, metric_df.yhat)
+    mae = mean_absolute_error(metric_df.y, metric_df.yhat)
+    rsme = np.sqrt(mean_squared_error(metric_df.y, metric_df.yhat))
+    
+    return [rsme, r2, mae, mse]
+
+    
+    
+
+def grid_search_params(data, changepoints, param_colors, holidays_df, periods=180, freq='D', saturated_growth=False):
+    """
+    
+    """
+    if saturated_growth == False:
+        #data['covid_period'] = np.where((data['ds'] > '2020-02-29') & (data['ds'] < '2020-04-29'), True, False)
+        
+        for changepoint in changepoints:
+            model = fbprophet.Prophet(changepoint_prior_scale=changepoint)
+            #model.add_country_holidays(country_name='US')
+            #model.add_seasonality(name='yearly', period=14, fourier_order=10, condition_name='covid_period')
+            model.fit(data)
+
+            future = model.make_future_dataframe(periods=periods, freq=freq)
+            #future['cap'] = 70000
+            #future['covid_period'] = np.where((future['ds'] > '2020-02-29') & (future['ds'] < '2020-04-29'), True, False)
+            future = model.predict(future)
+
+            data[changepoint] = future['yhat']
+
+
+        plt.figure(figsize=(18, 13))
+        plt.plot(data['ds'], data['y'], 'ko', label = 'Observations')
+        colors = param_colors
+
+        for changepoint in changepoints:
+            plt.plot(data['ds'], data[changepoint], color = colors[changepoint], label = '%.3f prior scale' % changepoint)
+
+        plt.legend(prop={'size': 14})
+        plt.xlabel('Date'); plt.ylabel('Shipped Units'); plt.title('Effect of Changepoint Prior Scale')
+        return plt.show();
+    
+    else:
+        data['cap'] = 70000
+        data['covid_period'] = np.where((data['ds'] > '2020-02-29') & (data['ds'] < '2020-04-29'), True, False)
+        
+        for changepoint in changepoints:
+            model = fbprophet.Prophet(changepoint_prior_scale=changepoint, yearly_seasonality=False,
+                                     holidays=holidays_df,
+                                     growth='logistic')
+            model.add_country_holidays(country_name='US')
+            model.add_seasonality(name='yearly', period=30, fourier_order=15, condition_name='covid_period')
+            model.fit(data)
+
+            future = model.make_future_dataframe(periods=periods, freq=freq)
+            future['cap'] = 70000
+            future['covid_period'] = np.where((future['ds'] > '2020-02-29') & (future['ds'] < '2020-04-29'), True, False)
+            future = model.predict(future)
+            data[changepoint] = future['yhat']
+
+
+        plt.figure(figsize=(18, 13))
+        plt.plot(data['ds'], data['y'], 'ko', label = 'Observations')
+        colors = param_colors
+
+        for changepoint in changepoints:
+            plt.plot(data['ds'], data[changepoint], color = colors[changepoint], label = '%.3f prior scale' % changepoint)
+
+        plt.legend(prop={'size': 14})
+        plt.xlabel('Date'); plt.ylabel('Shipped Units'); plt.title('Effect of Changepoint Prior Scale')
+        return plt.show(); 
+    
+
+def get_holidays(custom_days, year):
+    """
+    returns a dataframe containg holidays and associated dates in a format the prophet model can understand.
+
+    Argument(s):
+    ************
+
+    1. custom_days: dict
+        custom dict containing key (dates) and values (holidays)
+
+    2. year: list
+        list containing the relevant year(s) in the data 
+
+    **************************
+    Example:
+    ecomm_days = {'2020-07-06':'Prime Day','2019-11-29': 'Black Friday','2019-12-02': 'Cyber Monday'}
+    year = [2019, 2020]
+
+    test_df = get_holidays(ecomm_days, year)
+    print(test_df.reset_index(drop=True))
+
+           ds                     holidays
+    0   2019-01-01               New Year's Day
+    1   2019-01-21  Martin Luther King, Jr. Day
+    2   2019-02-18        Washington's Birthday
+    3   2019-05-27                 Memorial Day
+    4   2019-07-04             Independence Day
+    5   2019-09-02                    Labor Day
+    6   2019-10-14                 Columbus Day
+    7   2019-11-11                 Veterans Day
+    8   2019-11-28                 Thanksgiving
+    9   2019-11-29                 Black Friday
+    10  2019-12-02                 Cyber Monday
+    11  2019-12-25                Christmas Day
+    12  2020-01-01               New Year's Day
+    13  2020-01-20  Martin Luther King, Jr. Day
+    14  2020-02-17        Washington's Birthday
+    15  2020-05-25                 Memorial Day
+    16  2020-07-03  Independence Day (Observed)
+    17  2020-07-04             Independence Day
+    18  2020-07-06                    Prime Day
+    19  2020-09-07                    Labor Day
+    20  2020-10-12                 Columbus Day
+    21  2020-11-11                 Veterans Day
+    22  2020-11-26                 Thanksgiving
+    23  2020-12-25                Christmas Day
+
+    """
+    import holidays 
+    holiday_dict = holidays.US(years=year)
+    custom_holiday_dict = holidays.HolidayBase()
+    custom_holiday_dict.append(custom_days)
+
+    holiday_list = []
+    date_list = []
+    for i in holiday_dict.items():
+        date_list.append(i[0])
+        holiday_list.append(i[1])
+    df_a = pd.DataFrame({'ds': date_list, 'holiday': holiday_list})
+
+    custom_holiday_list = []
+    custom_date_list = []   
+    for i in custom_holiday_dict.items():
+        custom_date_list.append(i[0])
+        custom_holiday_list.append(i[1])
+    df_b = pd.DataFrame({'ds': custom_date_list, 'holiday': custom_holiday_list})
+
+    holiday_df = pd.concat([df_a, df_b])
+    holiday_df.reset_index(drop=True)
+    return holiday_df.sort_values(by='ds')
+
+
+def view_predictions2(train_data, test_data, predictions_df, start=100, title='title'):
+    """
+    
+    """
+    
+    fig, ax = plt.subplots(figsize=(18, 13))
+    ax.plot(predictions_df.ds, predictions_df.yhat)
+    ax.scatter(train_data.ds, train_data.y, c='black', s=8)
+    ax.axvline(predictions_df.ds[start], color='r')
+    ax.axvline(test_data.ds.iloc[-1], color='g')
+    ax.fill_between(predictions_df.ds, y1=predictions_df.yhat_lower, y2=predictions_df.yhat_upper, alpha=.2)
+    ax.scatter(test_data.ds, test_data.y, c='red', s=8)
+    plt.xlabel('Date')
+    plt.ylabel('Shipped Units')
+    plt.title(f'Shipped Units Forecast:\n {title}', fontsize=18)
+    plt.grid()
+    return fig.show();   
