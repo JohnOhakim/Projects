@@ -1,0 +1,17 @@
+SELECT
+  start_date,
+  asin,
+  product_title,
+  n1_purchased_asin,
+  n1_purchased_product_title,
+  n1_purchased_percent,
+  n2_purchased_asin,
+  n2_purchased_product_title,
+  n2_purchased_percent,
+  n3_purchased_asin,
+  n3_purchased_product_title,
+  n3_purchased_percent
+FROM 
+    `cp-gaa-visualization-dev.arap.alternate_purchase_wly` 
+WHERE 
+    country = 'USA'

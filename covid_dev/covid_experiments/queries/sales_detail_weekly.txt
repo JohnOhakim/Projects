@@ -1,0 +1,19 @@
+SELECT 
+  start_date
+  , end_date
+  , asin
+  , product_title
+  , brand
+  , subcategory
+  , category
+  , ordered_revenue
+  , ordered_revenue_prior_period
+  , ordered_units
+  , ordered_units_prior_period
+  , subcategory_sales_rank
+  , subcategory_betterorworse
+FROM 
+  `cp-gaa-visualization-dev.arap.sales_diagnostic_detail_wly` 
+  
+WHERE
+  country = 'USA'

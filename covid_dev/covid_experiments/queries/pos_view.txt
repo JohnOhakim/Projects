@@ -1,0 +1,20 @@
+SELECT
+  date,
+  country,
+  SUM(qty_sold) qty_sold,
+  subcategory,
+  category,
+  SUM(baseline_qty_sold) baseline_qty_sold,
+  
+FROM 
+  cp-saa-dev-covid19.combined_reporting.1ph_pos_supp_view 
+WHERE
+  date > '2020-02-01'
+  AND country in ('United Kingdom', 'United States', 'Mexico', 'Argentina', 'Australia')
+ GROUP BY
+  date,
+  country,
+  subcategory,
+  category
+  
+ORDER BY date

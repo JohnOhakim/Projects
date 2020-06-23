@@ -1,0 +1,19 @@
+SELECT
+  date,
+  country,
+  qty_sold,
+  subcategory,
+  category,
+  baseline_qty_sold,
+  policy.StringencyIndexForDisplay StringencyIndexForDisplay, 
+  policy.LegacyStringencyIndex LegacyStringencyIndex, 
+  policy.LegacyStringencyIndexForDisplay LegacyStringencyIndexForDisplay, 
+  mobility.residential_percent_change_from_baseline residential_percent_change_from_baseline 
+FROM 
+  `cp-saa-dev-covid19.combined_reporting.1ph_pos_supp_view` 
+WHERE
+  date > '2020-02-01'
+  AND country in ('United Kingdom', 'United States', 'Mexico', 'Argentina', 'Australia')
+  AND subcategory in ('Liquid Hand Wash', 'Toothpaste', 'Body Wash') 
+  
+ORDER BY date, policy.StringencyIndexForDisplay ASC
